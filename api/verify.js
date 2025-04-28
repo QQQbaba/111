@@ -22,6 +22,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ success: false, message: '密码错误' });
     }
   } catch (error) {
+    console.error('验证密码时出错:', error);
     return res.status(400).json({ success: false, message: '请求格式错误' });
   }
 } 

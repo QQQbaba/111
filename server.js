@@ -16,6 +16,8 @@ async function handler(req) {
   const url = new URL(req.url);
   const path = url.pathname;
   
+  console.log(`收到请求: ${path}`);
+  
   // 检查cookie中的会话
   const cookieHeader = req.headers.get("cookie") || "";
   const cookies = Object.fromEntries(
@@ -46,6 +48,7 @@ async function handler(req) {
         });
       }
     } catch (e) {
+      console.error("处理密码验证时出错:", e);
       return new Response(JSON.stringify({ success: false, message: "请求格式错误" }), {
         status: 400,
         headers: { "Content-Type": "application/json" }
@@ -70,7 +73,8 @@ async function handler(req) {
     if (path.endsWith(".css") || path.endsWith(".js")) {
       try {
         return await serveFile(req, `.${path}`);
-      } catch {
+      } catch (e) {
+        console.error(`无法提供文件 ${path}:`, e);
         return new Response("未找到", { status: 404 });
       }
     }
@@ -88,9 +92,18 @@ async function handler(req) {
     const normalizedPath = path.replace(/\/\.{1,2}\//g, "/");
     const filePath = `.${normalizedPath}`;
     
+    console.log(`尝试提供文件: ${filePath}`);
+    
+    // 特殊处理 - 检查2022.html文件
+    if (path === "/2022.html") {
+      console.log("尝试提供主内容文件");
+      return await serveFile(req, "./2022.html");
+    }
+    
     return await serveFile(req, filePath);
-  } catch {
-    return new Response("未找到", { status: 404 });
+  } catch (e) {
+    console.error(`无法提供文件 ${path}:`, e);
+    return new Response(`未找到文件：${path}`, { status: 404 });
   }
 }
 
