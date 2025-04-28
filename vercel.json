@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "vercel-deno@2.0.0"
+    }
+  },
+  "routes": [
+    { "src": "/", "dest": "/index.html" },
+    { "src": "/verify-password", "dest": "/api/verify.js" },
+    { "src": "/(.*)", "dest": "/$1" }
+  ]
+} 

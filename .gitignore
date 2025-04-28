@@ -1,0 +1,9 @@
+# Deno
+.env
+.DS_Store
+
+# Vercel
+.vercel
+
+# Node
+node_modules/ 
