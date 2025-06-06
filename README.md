@@ -21,7 +21,34 @@
 
 ## 快速开始
 
-### 1. 环境准备
+### 方式一：开发环境
+
+```bash
+# 克隆项目
+git clone https://github.com/webwww123/111.git
+cd 111
+
+# 构建前端
+./scripts/build.sh
+
+# 启动开发环境
+./scripts/dev.sh
+```
+
+### 方式二：生产部署
+
+```bash
+# 克隆项目
+git clone https://github.com/webwww123/111.git
+cd 111
+
+# 运行部署脚本（自动安装依赖）
+./scripts/deploy.sh
+```
+
+### 方式三：手动部署
+
+#### 1. 环境准备
 
 ```bash
 # 安装依赖
@@ -32,21 +59,31 @@ sudo apt install -y docker.io docker-compose lxcfs
 sudo systemctl enable --now lxcfs
 ```
 
-### 2. 部署应用
+#### 2. 构建应用
 
 ```bash
-# 克隆项目
-git clone <repository-url>
-cd studyroom
+# 构建前端
+cd frontend
+npm install
+npm run build
+cd ..
 
+# 创建数据目录
+mkdir -p data/redis
+```
+
+#### 3. 启动服务
+
+```bash
 # 构建并启动服务
+docker-compose build
 docker-compose up -d
 
 # 查看服务状态
 docker-compose ps
 ```
 
-### 3. 创建管理员账号
+#### 4. 创建管理员账号
 
 ```bash
 curl -X POST http://localhost/api/register \
@@ -54,7 +91,9 @@ curl -X POST http://localhost/api/register \
   -d '{"name":"admin","pass":"your-password"}'
 ```
 
-### 4. 配置 Cloudflare Tunnel (可选)
+## 配置 Cloudflare Tunnel (可选)
+
+用于将内网服务安全地暴露到公网：
 
 ```bash
 # 安装 cloudflared
@@ -67,9 +106,56 @@ cloudflared tunnel route dns studyroom study.example.com
 cloudflared tunnel run --url https://localhost:443
 ```
 
+## 使用说明
+
+### 学生使用流程
+
+1. 访问网站并注册/登录账号
+2. 点击"创建学习桌面"按钮
+3. 等待桌面容器创建完成
+4. 在自己的桌面中进行学习
+5. 可以观看其他同学的桌面（只读）
+6. 使用聊天室与其他同学交流
+7. 学习结束后点击"结束学习"
+
+### 管理员功能
+
+- 查看所有在线用户
+- 监控系统资源使用
+- 管理用户会话
+
 ## 开发说明
 
 详细的开发指南请参考 `开发指南` 文件。
+
+### 项目结构
+
+```
+├── backend/          # FastAPI 后端服务
+├── chat/            # Socket.IO 聊天服务
+├── frontend/        # Vue 3 前端应用
+├── manager/         # 容器管理服务
+├── nginx/           # Nginx 配置
+├── scripts/         # 部署和构建脚本
+├── data/            # 数据存储目录
+└── docker-compose.yml
+```
+
+### 开发环境
+
+```bash
+# 启动开发环境
+./scripts/dev.sh
+
+# 查看日志
+docker-compose logs -f [service_name]
+
+# 重启服务
+docker-compose restart [service_name]
+
+# 停止服务
+docker-compose down
+```
 
 ## 资源限制
 
