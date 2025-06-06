@@ -1,0 +1,296 @@
+# 网络自习室 – 开发说明书
+
+> **版本**：v1.0（2025‑06‑05）
+> **作者**：ChatGPT（统筹）
+
+---
+
+## 1. 项目概述
+
+* **目标**：为最多 50 名同时在线的学生提供基于浏览器的 Linux 桌面自习环境，支持实时旁观、文字聊天与自动回收。
+* **特点**：
+
+  1. 每位用户独占一台 `Ubuntu + Xfce` 容器，资源上限 **1 GiB RAM / 0.5 vCPU**。
+  2. 首页可同时观看所有在线桌面（自己可操作、他人只读）。
+  3. 同一账号一次仅允许存在 1 台容器。
+  4. 匿名化资源信息：容器内 `/proc/*` 显示的 CPU/内存匹配配额，而非宿主机实际值。
+  5. 单域名、单端口（443），通过 **Cloudflare Tunnel** 将内网流量安全公开。
+  6. 内置 Socket.IO 聊天室；消息持久化至 SQLite，头像使用 **Jdenticon** SVG。
+
+---
+
+## 2. 总体架构
+
+```text
+┌───────────────┐        Cloudflare Tunnel (HTTPS/WSS)
+│  Browser SPA  │  ─────────────────────────────────────┐
+└───────────────┘                                       ▼
+                ┌──────────────────────────────────────────────┐
+                │                NGINX :443                   │
+                │  /           → frontend  :5173 (Vite)       │
+                │  /api/…     → backend   :8000 (FastAPI)     │
+                │  /ws/chat   → chat      :7000 (Socket.IO)   │
+                │  /ws/vnc/<cid> → websockify :59xx → desk‑<cid>│
+                └──────────────────────────────────────────────┘
+                                        ▲         ▲
+                                        │         │
+                          ┌─────────────┘         └─────────────┐
+                          │                                     │
+              ┌───────────────────────┐          ┌───────────────────────┐
+              │   Apache Guacamole    │          │  Container Manager    │
+              │      (tomcat)         │          │  (Python & Docker API)│
+              └───────────────────────┘          └───────────────────────┘
+```
+
+* **Guacamole**：统一处理 VNC 协议；`guacd` 与 `tomcat` 监听容器 4822/8080，仅内网可见。
+* **Container Manager**：监听用户事件，创建/删除/续时容器；定时扫描 Redis 心跳，10 min 无操作即 `docker rm -f`。
+
+---
+
+## 3. 组件明细
+
+| 组件           | 镜像 / 技术栈                              | 端口   | 资源预留                | 说明                    |
+| ------------ | ------------------------------------- | ---- | ------------------- | --------------------- |
+| **frontend** | `node:20-alpine` + Vite + Vue 3       | 5173 | 50 MiB / 0.1 CPU    | 编译后静态文件交由 Nginx 服务    |
+| **backend**  | `python:3.12-slim` + FastAPI          | 8000 | 200 MiB / 0.2 CPU   | 认证、会话、REST API        |
+| **chat**     | `node:20-alpine` + Socket.IO          | 7000 | 150 MiB / 0.2 CPU   | WS 聊天室，SQLite 本地文件    |
+| **guacd**    | `guacamole/guacd:1.5.5`               | 4822 | 100 MiB / 0.2 CPU   | 协议网关                  |
+| **tomcat**   | `guacamole/guacamole:1.5.5`           | 8080 | 512 MiB / 1.0 CPU   | 管理 REST & HTTP Tunnel |
+| **redis**    | `redis:7-alpine`                      | 6379 | 30 MiB / 0.1 CPU    | 会话心跳、聊天室广播            |
+| **desk‑**    | `kasmweb/ubuntu-focal-desktop:1.14.0` | 59xx | **1 GiB / 0.5 CPU** | 用户桌面容器                |
+
+---
+
+## 4. 资源与安全策略
+
+```bash
+# ① 容器资源
+--memory=1g --memory-swap=0 \
+--cpu-period=100000 --cpu-quota=50000 \
+--pids-limit=512
+
+# ② 隐藏硬件信息
+apt install -y lxcfs
+mkdir -p /var/lib/lxcfs/proc
+# systemd unit 已随包提供
+
+# docker run 示例
+-v /var/lib/lxcfs/proc:/proc \
+--security-opt seccomp=unconfined \
+--userns=keep-id  # (可选 userns-remap)
+```
+
+* **Cloudflare Tunnel**：
+
+  ```bash
+  cloudflared tunnel create studyroom
+  cloudflared tunnel route dns studyroom study.example.com
+  cloudflared tunnel run --url https://localhost:443
+  ```
+* **Fail2ban**：监控 `/var/log/nginx/access.log`，配置 5 分钟内 10 次失败即拉黑。
+
+---
+
+## 5. 数据库 Schema (SQLite)
+
+```sql
+-- users
+CREATE TABLE users (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  pass TEXT NOT NULL -- bcrypt 哈希
+);
+
+-- sessions (一行对应一台容器)
+CREATE TABLE sessions (
+  id        TEXT PRIMARY KEY,  -- cid (uuid4)
+  user_id   INTEGER NOT NULL,
+  started   INTEGER,           -- epoch ms
+  expires   INTEGER,           -- epoch ms
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+-- messages
+CREATE TABLE messages (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user    TEXT,
+  sent_at INTEGER,
+  text    TEXT
+);
+
+CREATE INDEX idx_messages_time ON messages(sent_at);
+```
+
+> **清理规则**：新插入消息后执行 `DELETE FROM messages WHERE id < (SELECT id FROM messages ORDER BY id DESC LIMIT 1 OFFSET 100);`
+
+---
+
+## 6. API 设计
+
+### 6.1 认证
+
+| 方法     | 路径              | 请求体            | 响应            |
+| ------ | --------------- | -------------- | ------------- |
+| `POST` | `/api/register` | `{name, pass}` | 201 / 409     |
+| `POST` | `/api/login`    | `{name, pass}` | `{token}` JWT |
+
+### 6.2 容器管理
+
+| 方法       | 路径                        | 说明                   |
+| -------- | ------------------------- | -------------------- |
+| `POST`   | `/api/sessions`           | 创建容器；若已有活动容器返回 409   |
+| `GET`    | `/api/sessions/me`        | 返回自己容器状态与 VNC WS URL |
+| `DELETE` | `/api/sessions/me`        | 手动销毁                 |
+| `POST`   | `/api/sessions/me/extend` | 续 30 min             |
+
+### 6.3 聊天室 (Socket.IO)
+
+| 事件             | 数据                   | 说明            |
+| -------------- | -------------------- | ------------- |
+| `chat:send`    | `{text}`             | 客户端→服务器       |
+| `chat:new`     | `{user, time, text}` | 服务器广播         |
+| `chat:history` | `[msg, …]`           | 登录后推送最近 100 条 |
+
+---
+
+## 7. 前端路由 & 状态机
+
+* `/login` → 登录 / 注册页面；成功后保存 JWT 于 `localStorage`。
+* `/study` → 主面板：
+
+  * 顶栏：剩余座位数、聊天室按钮、退出登录。
+  * 网格：`v-for 50` 渲染 `<VncCard>`；自己的卡片带操作栏（放大、续 30 min、删除）。
+  * `<ChatDrawer>`：Socket.IO 客户端；头像：`<svg data-jdenticon-value="{{name}}" />`。
+
+---
+
+## 8. 容器管理脚本（伪代码）
+
+```python
+while True:
+    for s in db.sessions.find_all():
+        if time.time() > s.expires:
+            docker.remove(s.id, force=True)
+            db.sessions.delete(s.id)
+    time.sleep(30)
+```
+
+---
+
+## 9. docker‑compose.yml（摘录）
+
+```yaml
+version: "3.9"
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    ports: ["443:443"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    depends_on: [backend, chat, guacd, tomcat]
+
+  backend:
+    build: ./backend
+    environment:
+      - DB_PATH=/data/app.db
+    volumes:
+      - ./data:/data
+
+  chat:
+    build: ./chat
+    volumes:
+      - ./data:/data
+
+  redis:
+    image: redis:7-alpine
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+
+  tomcat:
+    image: guacamole/guacamole:1.5.5
+    environment:
+      GUACD_HOSTNAME: guacd
+      MYSQL_DISABLED: "true"
+
+  manager:
+    build: ./manager
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/lxcfs/proc:/proc:ro
+    depends_on: [redis]
+```
+
+> **说明**：桌面容器 `desk‑<cid>` 由 `manager` 动态 `docker run`，不写入 compose。
+
+---
+
+## 10. Nginx 路由片段
+
+```nginx
+map $uri $desk_host {
+    ~^/ws/vnc/(?<cid>[0-9a-f\-]{36})$ desk-$cid:5901;
+}
+
+upstream chat_ws { server chat:7000; }
+
+server {
+    listen 443 ssl http2;
+    ssl_certificate     /etc/nginx/cert/fullchain.pem;
+    ssl_certificate_key /etc/nginx/cert/privkey.pem;
+
+    location /ws/chat {
+        proxy_pass http://chat_ws;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location ~ ^/ws/vnc/ {
+        proxy_pass http://$desk_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /api/ {
+        proxy_pass http://backend:8000/;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
+```
+
+---
+
+## 11. 部署步骤
+
+1. **准备宿主环境**：Ubuntu 22.04 LTS，安装 Docker 25+、docker‑compose v2、cloudflared、lxcfs。
+2. `git clone https://github.com/…/studyroom.git && cd studyroom`。
+3. `docker compose pull && docker compose up -d`。
+4. 运行 `cloudflared tunnel run studyroom`，确认 `https://study.example.com` 可访问。
+5. 创建首个管理员账号：`curl -X POST http://localhost/api/register -d '{"name":"admin","pass":"***"}'`。
+
+---
+
+## 12. 压测计划
+
+* `wrk` + `autocannon`：
+
+  * 50 条持续 WebSocket + REST 心跳 1 h。
+  * 记录 `cpu`, `mem`, `loadavg`, `fps`，阈值 `CPU<80%`, `Mem<14 GiB`。
+* 目标：峰值 FPS ≥15，平均 RTT ≤150 ms。
+
+---
+
+## 13. 后续迭代
+
+1. **多主机集群**：引入 K3s + Traefik，容器调度到多台宿主。
+2. **WebRTC 桌面流**：替换 VNC 以降低带宽。
+3. **OAuth 登录**：接入校园统一身份。
+4. **数据磁盘**：挂载 NFS，让用户可选保存作业文件。
+
+---
+
+> **交付物**：本说明书 + 源码仓库 skeleton + 压测报告。请 Claude 4 依照本文实现业务逻辑，特别注意容器创建、心跳、自动销毁与会话唯一性检查。
