@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -10,8 +10,8 @@ RUN npm ci --only=production
 COPY . .
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+RUN groupadd -g 1001 nodejs
+RUN useradd -r -u 1001 -g nodejs nodejs
 RUN chown -R nodejs:nodejs /app
 USER nodejs
 
@@ -20,7 +20,7 @@ EXPOSE 7000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:7000/health || exit 1
+    CMD curl -f http://localhost:7000/health || exit 1
 
 # Start the application
 CMD ["node", "server.js"]

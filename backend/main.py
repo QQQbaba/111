@@ -62,7 +62,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    return {"status": "ok"}
 
 
 @app.post("/api/register", status_code=status.HTTP_201_CREATED)

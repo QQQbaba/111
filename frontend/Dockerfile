@@ -24,5 +24,5 @@ RUN apk add --no-cache rsync
 # Copy built files
 COPY --from=build /app/dist /dist
 
-# Copy files to volume and exit
-CMD ["sh", "-c", "rsync -av /dist/ /usr/share/nginx/html/ && echo 'Frontend build copied successfully'"]
+# Copy files to volume and keep container alive
+CMD ["sh", "-c", "rsync -av /dist/ /usr/share/nginx/html/ && echo 'Frontend build copied successfully' && tail -f /dev/null"]
