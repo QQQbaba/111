@@ -24,7 +24,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import RFB from '@novnc/novnc/core/rfb'
+// import RFB from '@novnc/novnc/core/rfb.js'
 
 const props = defineProps({
   sessionId: {

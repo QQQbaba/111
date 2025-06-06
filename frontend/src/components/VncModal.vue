@@ -140,7 +140,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import VncViewer from './VncViewer.vue'
 import { formatExpireTime } from '../utils/time'
-import { jdenticon } from 'jdenticon'
+import * as jdenticon from 'jdenticon'
 
 const props = defineProps({
   open: {

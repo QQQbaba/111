@@ -43,8 +43,9 @@ async def init_database():
     """Initialize database with required tables"""
     # Ensure data directory exists
     os.makedirs(os.path.dirname(db.db_path), exist_ok=True)
-    
-    async with await db.get_connection() as conn:
+
+    conn = await aiosqlite.connect(db.db_path)
+    try:
         # Users table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -76,3 +77,5 @@ async def init_database():
         
         await conn.commit()
         print("Database initialized successfully")
+    finally:
+        await conn.close()

@@ -95,7 +95,6 @@ services:
       - DB_PATH=/data/app.db
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/lxcfs/proc:/proc:ro
       - ./data:/data
     depends_on:
       - redis

@@ -106,7 +106,7 @@
 <script setup>
 import { onMounted } from 'vue'
 import VncViewer from './VncViewer.vue'
-import { jdenticon } from 'jdenticon'
+import * as jdenticon from 'jdenticon'
 
 const props = defineProps({
   session: {

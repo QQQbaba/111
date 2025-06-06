@@ -129,7 +129,7 @@
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { formatTime } from '../utils/time'
-import { jdenticon } from 'jdenticon'
+import * as jdenticon from 'jdenticon'
 
 const props = defineProps({
   open: {

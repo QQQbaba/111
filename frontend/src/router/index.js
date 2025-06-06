@@ -25,9 +25,9 @@ const router = createRouter({
 })
 
 // Navigation guards
-router.beforeEach((to, from, next) => {
-  // Import here to avoid circular dependency
-  const { useAuthStore } = require('../stores/auth')
+router.beforeEach(async (to, from, next) => {
+  // Dynamic import to avoid circular dependency
+  const { useAuthStore } = await import('../stores/auth')
   const authStore = useAuthStore()
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {

@@ -26,10 +26,12 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['vue', 'vue-router', 'pinia'],
-          novnc: ['@novnc/novnc'],
           socket: ['socket.io-client']
         }
       }
     }
+  },
+  optimizeDeps: {
+    include: ['@novnc/novnc/core/rfb.js']
   }
 })
